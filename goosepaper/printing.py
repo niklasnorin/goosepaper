@@ -202,7 +202,7 @@ def print_paper(
             headers={"Content-Type": IPP_CONTENT_TYPE},
             timeout=IPP_REQUEST_TIMEOUT_SECONDS,
         )
-    except requests.RequestException as err:
+    except Exception as err:
         raise PrintError(f"Couldn't reach the printer at {printer_uri}: {err}") from err
 
     if response.status_code != 200:
