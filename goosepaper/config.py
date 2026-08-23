@@ -14,6 +14,8 @@ from goosepaper.util import load_config_file, registered_story_providers
 CONFIG_VERSION = 2
 DEFAULT_PAPER_CONFIG_FILENAME = "goosepaper.json"
 REPLACE_MODES = ("never", "exact", "nocase")
+SIDES_MODES = ("one-sided", "two-sided-long-edge", "two-sided-short-edge")
+COLOR_MODES = ("auto", "color", "monochrome")
 
 
 class ConfigError(ValueError):
@@ -113,6 +115,63 @@ class DeliverySettings:
 
 
 @dataclass(frozen=True)
+class PrintIntent:
+    printer: Optional[str] = None
+    copies: Optional[int] = None
+    media: Optional[str] = None
+    sides: Optional[str] = None
+    color_mode: Optional[str] = None
+
+    def __post_init__(self):
+        if self.printer is not None:
+            _validate_printer(self.printer)
+        if self.copies is not None:
+            _validate_copies(self.copies)
+        if self.media is not None:
+            _validate_media(self.media)
+        if self.sides is not None:
+            _validate_sides(self.sides)
+        if self.color_mode is not None:
+            _validate_color_mode(self.color_mode)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "printer": self.printer,
+            "copies": self.copies,
+            "media": self.media,
+            "sides": self.sides,
+            "color_mode": self.color_mode,
+        }
+
+
+@dataclass(frozen=True)
+class PrintSettings:
+    printer: Optional[str] = None
+    copies: int = 1
+    media: Optional[str] = None
+    sides: str = "one-sided"
+    color_mode: str = "monochrome"
+
+    def __post_init__(self):
+        if self.printer is not None:
+            _validate_printer(self.printer)
+        _validate_copies(self.copies)
+        if self.media is not None:
+            _validate_media(self.media)
+        _validate_sides(self.sides)
+        _validate_color_mode(self.color_mode)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "printer": self.printer,
+            "copies": self.copies,
+            "media": self.media,
+            "sides": self.sides,
+            "color_mode": self.color_mode,
+        }
+
+
+@dataclass(frozen=True)
 class SourceConfig:
     type: str
     options: Dict[str, Any] = field(default_factory=dict)
@@ -133,6 +192,7 @@ class PaperConfig:
     paper: PaperSettings = field(default_factory=PaperSettings)
     sources: List[SourceConfig] = field(default_factory=list)
     delivery: DeliveryIntent = field(default_factory=DeliveryIntent)
+    printing: PrintIntent = field(default_factory=PrintIntent)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -140,6 +200,7 @@ class PaperConfig:
             "paper": self.paper.to_dict(),
             "sources": [source.to_dict() for source in self.sources],
             "delivery": self.delivery.to_dict(),
+            "printing": self.printing.to_dict(),
         }
 
 
@@ -147,11 +208,13 @@ class PaperConfig:
 class UserConfig:
     version: int = CONFIG_VERSION
     delivery_defaults: DeliverySettings = field(default_factory=DeliverySettings)
+    print_defaults: PrintSettings = field(default_factory=PrintSettings)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "version": self.version,
             "delivery_defaults": self.delivery_defaults.to_dict(),
+            "print_defaults": self.print_defaults.to_dict(),
         }
 
 
@@ -160,8 +223,10 @@ class ResolvedConfig:
     paper: PaperSettings
     sources: List[SourceConfig]
     delivery: DeliverySettings
+    printing: PrintSettings
     output: str
     deliver: bool
+    print_paper: bool
     nostory: bool
     showconfig: bool
     paper_config_path: Optional[Path]
@@ -176,8 +241,10 @@ class ResolvedConfig:
             "paper": self.paper.to_dict(),
             "sources": [source.to_dict() for source in self.sources],
             "delivery": self.delivery.to_dict(),
+            "printing": self.printing.to_dict(),
             "output": self.output,
             "deliver": self.deliver,
+            "print_paper": self.print_paper,
             "nostory": self.nostory,
             "showconfig": self.showconfig,
         }
@@ -234,6 +301,41 @@ def build_cli_parser() -> argparse.ArgumentParser:
         help="Keep the output file after delivery, even if user defaults say otherwise.",
     )
     parser.add_argument(
+        "--print",
+        dest="print_paper",
+        action="store_true",
+        required=False,
+        help="Send the output file to your network printer after rendering.",
+    )
+    parser.add_argument(
+        "--printer",
+        required=False,
+        help="Printer address for this run. A hostname, IP, or full ipp:// URI.",
+    )
+    parser.add_argument(
+        "--copies",
+        type=int,
+        required=False,
+        help="How many copies to print.",
+    )
+    parser.add_argument(
+        "--media",
+        required=False,
+        help='Paper size keyword to print on, such as "iso_a4_210x297mm".',
+    )
+    parser.add_argument(
+        "--sides",
+        choices=SIDES_MODES,
+        required=False,
+        help="Whether to print one-sided or two-sided.",
+    )
+    parser.add_argument(
+        "--color-mode",
+        choices=COLOR_MODES,
+        required=False,
+        help='Printer color mode: "auto", "color", or "monochrome".',
+    )
+    parser.add_argument(
         "-n",
         "--nostory",
         required=False,
@@ -268,7 +370,9 @@ def load_paper_config(path: Path) -> PaperConfig:
     raw = _load_json_object(path, "paper config")
     _maybe_raise_legacy_paper_config_error(raw)
     _require_config_version(raw, "paper config")
-    _reject_unknown_keys(raw, {"version", "paper", "sources", "delivery"}, "paper config")
+    _reject_unknown_keys(
+        raw, {"version", "paper", "sources", "delivery", "printing"}, "paper config"
+    )
 
     try:
         return PaperConfig(
@@ -276,6 +380,7 @@ def load_paper_config(path: Path) -> PaperConfig:
             paper=_parse_paper_settings(raw.get("paper", {})),
             sources=_parse_sources(raw.get("sources", [])),
             delivery=_parse_delivery_intent(raw.get("delivery", {})),
+            printing=_parse_print_intent(raw.get("printing", {})),
         )
     except ValueError as err:
         raise ConfigError(str(err)) from err
@@ -290,13 +395,18 @@ def load_user_config(path: Optional[Path] = None) -> UserConfig:
 
     _maybe_raise_legacy_user_config_error(raw)
     _require_config_version(raw, "user config")
-    _reject_unknown_keys(raw, {"version", "delivery_defaults"}, "user config")
+    _reject_unknown_keys(
+        raw, {"version", "delivery_defaults", "print_defaults"}, "user config"
+    )
 
     try:
         return UserConfig(
             version=CONFIG_VERSION,
             delivery_defaults=_parse_delivery_settings(
                 raw.get("delivery_defaults", {}), "delivery_defaults"
+            ),
+            print_defaults=_parse_print_settings(
+                raw.get("print_defaults", {}), "print_defaults"
             ),
         )
     except ValueError as err:
@@ -312,9 +422,16 @@ def resolve_runtime_config(args: Optional[Sequence[str]] = None) -> ResolvedConf
             "Run goosepaper with '--deliver' to use '--folder', '--replace-mode', or cleanup overrides."
         )
 
-    if cli_args.nostory and not cli_args.deliver:
+    if not cli_args.print_paper and _has_print_cli_overrides(cli_args):
         raise ConfigError(
-            "'--nostory' only makes sense together with '--deliver'. "
+            "Printing override flags require '--print'. "
+            "Run goosepaper with '--print' to use '--printer', '--copies', '--media', "
+            "'--sides', or '--color-mode'."
+        )
+
+    if cli_args.nostory and not (cli_args.deliver or cli_args.print_paper):
+        raise ConfigError(
+            "'--nostory' only makes sense together with '--deliver' or '--print'. "
             "Otherwise goosepaper has nothing to do."
         )
 
@@ -334,10 +451,28 @@ def resolve_runtime_config(args: Optional[Sequence[str]] = None) -> ResolvedConf
 
     should_load_user_config = (
         cli_args.deliver
+        or cli_args.print_paper
         or cli_args.showconfig
         or _has_delivery_cli_overrides(cli_args)
+        or _has_print_cli_overrides(cli_args)
     )
     user_config = load_user_config() if should_load_user_config else UserConfig()
+
+    printing = resolve_print_settings(
+        user_defaults=user_config.print_defaults,
+        paper_printing=paper_config.printing,
+        printer_override=cli_args.printer,
+        copies_override=cli_args.copies,
+        media_override=cli_args.media,
+        sides_override=cli_args.sides,
+        color_mode_override=cli_args.color_mode,
+    )
+
+    if cli_args.print_paper and not printing.printer:
+        raise ConfigError(
+            "Printing requires a printer address. Set \"printing\": {\"printer\": ...} in "
+            "your paper config, \"print_defaults\" in your user config, or pass '--printer'."
+        )
 
     return ResolvedConfig(
         paper=paper_config.paper,
@@ -349,8 +484,10 @@ def resolve_runtime_config(args: Optional[Sequence[str]] = None) -> ResolvedConf
             replace_mode_override=cli_args.replace_mode,
             cleanup_override=cli_args.cleanup,
         ),
+        printing=printing,
         output=cli_args.output or default_output_filename(),
         deliver=cli_args.deliver,
+        print_paper=cli_args.print_paper,
         nostory=cli_args.nostory,
         showconfig=cli_args.showconfig,
         paper_config_path=paper_config_path,
@@ -382,6 +519,43 @@ def resolve_delivery_settings(
             cleanup=user_defaults.cleanup
             if cleanup_override is None
             else cleanup_override,
+        )
+    except ValueError as err:
+        raise ConfigError(str(err)) from err
+
+
+def resolve_print_settings(
+    user_defaults: Optional[PrintSettings] = None,
+    paper_printing: Optional[PrintIntent] = None,
+    printer_override: Optional[str] = None,
+    copies_override: Optional[int] = None,
+    media_override: Optional[str] = None,
+    sides_override: Optional[str] = None,
+    color_mode_override: Optional[str] = None,
+) -> PrintSettings:
+    user_defaults = user_defaults or PrintSettings()
+    paper_printing = paper_printing or PrintIntent()
+
+    def pick(override, paper_value, default_value):
+        if override is not None:
+            return override
+        if paper_value is not None:
+            return paper_value
+        return default_value
+
+    try:
+        return PrintSettings(
+            printer=pick(
+                printer_override, paper_printing.printer, user_defaults.printer
+            ),
+            copies=pick(copies_override, paper_printing.copies, user_defaults.copies),
+            media=pick(media_override, paper_printing.media, user_defaults.media),
+            sides=pick(sides_override, paper_printing.sides, user_defaults.sides),
+            color_mode=pick(
+                color_mode_override,
+                paper_printing.color_mode,
+                user_defaults.color_mode,
+            ),
         )
     except ValueError as err:
         raise ConfigError(str(err)) from err
@@ -530,6 +704,33 @@ def _parse_delivery_settings(raw: Any, context: str) -> DeliverySettings:
         folder=section.get("folder"),
         replace_mode=replace_mode,
         cleanup=cleanup,
+    )
+
+
+_PRINT_KEYS = {"printer", "copies", "media", "sides", "color_mode"}
+
+
+def _parse_print_intent(raw: Any) -> PrintIntent:
+    section = _require_object(raw, "printing")
+    _reject_unknown_keys(section, _PRINT_KEYS, "printing")
+    return PrintIntent(
+        printer=section.get("printer"),
+        copies=section.get("copies"),
+        media=section.get("media"),
+        sides=section.get("sides"),
+        color_mode=section.get("color_mode"),
+    )
+
+
+def _parse_print_settings(raw: Any, context: str) -> PrintSettings:
+    section = _require_object(raw, context)
+    _reject_unknown_keys(section, _PRINT_KEYS, context)
+    return PrintSettings(
+        printer=section.get("printer"),
+        copies=section.get("copies", PrintSettings.copies),
+        media=section.get("media"),
+        sides=section.get("sides", PrintSettings.sides),
+        color_mode=section.get("color_mode", PrintSettings.color_mode),
     )
 
 
@@ -701,6 +902,39 @@ def _validate_folder(folder: Optional[str], context: str):
         raise ValueError(f"{context} cannot contain '/'. Nested folders are not supported.")
 
 
+def _validate_printer(printer: Any):
+    if not isinstance(printer, str) or not printer.strip():
+        raise ValueError("printer must be a non-empty string or null.")
+
+
+def _validate_copies(copies: Any):
+    if not isinstance(copies, int) or isinstance(copies, bool) or copies <= 0:
+        raise ValueError("copies must be a positive integer.")
+
+
+def _validate_media(media: Any):
+    if not isinstance(media, str) or not media.strip():
+        raise ValueError("media must be a non-empty string or null.")
+
+
+def _validate_sides(sides: Any):
+    if sides not in SIDES_MODES:
+        raise ValueError(
+            "sides must be one of: "
+            + ", ".join(f'"{mode}"' for mode in SIDES_MODES)
+            + "."
+        )
+
+
+def _validate_color_mode(color_mode: Any):
+    if color_mode not in COLOR_MODES:
+        raise ValueError(
+            "color_mode must be one of: "
+            + ", ".join(f'"{mode}"' for mode in COLOR_MODES)
+            + "."
+        )
+
+
 def _validate_string(value: Any, context: str):
     if not isinstance(value, str) or not value:
         raise ConfigError(f"{context} must be a non-empty string.")
@@ -829,6 +1063,18 @@ def _reject_unknown_keys(raw: Dict[str, Any], allowed_keys: set, context: str):
         raise ConfigError(
             f"Unknown field(s) in {context}: " + ", ".join(unknown) + "."
         )
+
+
+def _has_print_cli_overrides(cli_args: argparse.Namespace) -> bool:
+    return any(
+        [
+            cli_args.printer is not None,
+            cli_args.copies is not None,
+            cli_args.media is not None,
+            cli_args.sides is not None,
+            cli_args.color_mode is not None,
+        ]
+    )
 
 
 def _has_delivery_cli_overrides(cli_args: argparse.Namespace) -> bool:

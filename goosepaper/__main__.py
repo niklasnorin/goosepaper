@@ -2,6 +2,7 @@ import sys
 
 from goosepaper.goosepaper import Goosepaper
 from goosepaper.config import ConfigError, dump_resolved_config, resolve_runtime_config
+from goosepaper.printing import PrintError, print_paper
 from goosepaper.upload import upload
 from goosepaper.util import construct_story_providers_from_source_configs
 
@@ -55,6 +56,17 @@ def main(args=None):
             )
         else:
             print(f"Unknown file extension '{config.output.split('.')[-1]}'.")
+            return 1
+
+    if config.print_paper:
+        try:
+            print_paper(
+                filepath=config.output,
+                print_settings=config.printing,
+                showconfig=config.showconfig,
+            )
+        except PrintError as err:
+            print(f"Honk! {err}")
             return 1
 
     if config.deliver:
