@@ -33,7 +33,7 @@ class _Session:
 
 
 def _ipp_response_bytes(status_code: int) -> bytes:
-    return struct.pack(">BBHI", 2, 0, status_code, 1) + b"\x03"
+    return struct.pack(">BBHI", 1, 1, status_code, 1) + b"\x03"
 
 
 def _write_pdf(directory: Path) -> Path:
@@ -81,7 +81,7 @@ def test_build_print_job_request_contains_attributes_and_payload():
     version_major, version_minor, operation, request_id = struct.unpack(
         ">BBHI", request[:8]
     )
-    assert (version_major, version_minor, operation, request_id) == (2, 0, 0x0002, 1)
+    assert (version_major, version_minor, operation, request_id) == (1, 1, 0x0002, 1)
     assert b"printer-uri" in request
     assert b"ipp://printer.local:631/ipp/print" in request
     assert b"job-name" in request

@@ -17,7 +17,7 @@ from .config import PrintSettings
 DEFAULT_IPP_PORT = 631
 DEFAULT_IPP_PATH = "/ipp/print"
 IPP_CONTENT_TYPE = "application/ipp"
-IPP_VERSION = (2, 0)
+IPP_VERSION = (1, 1)
 IPP_PRINT_JOB_OPERATION = 0x0002
 IPP_REQUEST_TIMEOUT_SECONDS = 60
 
