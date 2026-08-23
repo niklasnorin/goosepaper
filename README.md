@@ -61,6 +61,33 @@ docker run -it --rm \
 
 Otherwise, you can now email this PDF to your tablet, perhaps using [ReMailable](https://github.com/j6k4m8/remailable).
 
+### step 3 (optional): print it instead
+
+If you'd rather read your paper on actual paper, Goosepaper can send it to a
+network printer that speaks IPP/AirPrint (most home printers do, including the
+Canon TS5350a). No print drivers or CUPS install required:
+
+```shell
+docker run -it --rm -v $(pwd):/goosepaper/mount j6k4m8/goosepaper \
+    goosepaper -c mount/example-config.json -o mount/Goosepaper.pdf \
+    --print --printer 192.168.1.42
+```
+
+You can also put the printer in your config file so a scheduled morning run
+needs no extra flags:
+
+```json
+"printing": {
+    "printer": "TS5350a.local",
+    "media": "iso_a4_210x297mm",
+    "color_mode": "monochrome"
+}
+```
+
+Set `"page_profile": "a4"` (or `"letter"`) in the `paper` section when the paper
+is headed for a printer instead of a tablet. More printing options are
+documented in [Customizing](docs/Customizing.md).
+
 ## get started without docker: installation
 
 ### dependencies:

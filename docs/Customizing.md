@@ -82,6 +82,64 @@ Supported `delivery_defaults` fields:
 The paper config's `delivery` section only supports `folder`.
 Delivery still happens only when you run Goosepaper with `--deliver`.
 
+## Printing
+
+Goosepaper can also send the finished paper straight to a network printer that
+speaks IPP (which is what AirPrint uses). Most home printers do, including the
+Canon TS5350a. No CUPS or printer driver is required: Goosepaper talks to the
+printer directly over the local network, which works well from a container on a
+home server as long as the container can reach the printer's IP.
+
+Add a `printing` section to your paper config:
+
+```json
+{
+    "version": 2,
+    "paper": {},
+    "sources": [],
+    "printing": {
+        "printer": "192.168.1.42",
+        "copies": 1,
+        "media": "iso_a4_210x297mm",
+        "sides": "two-sided-long-edge",
+        "color_mode": "monochrome"
+    }
+}
+```
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `printer` | str or null | `null` | Printer address. A hostname (`TS5350a.local`), an IP (`192.168.1.42`), or a full `ipp://`/`ipps://` URI. Bare addresses become `ipp://<address>:631/ipp/print`. |
+| `copies` | int | `1` | How many copies to print. |
+| `media` | str or null | `null` | Paper size keyword, such as `iso_a4_210x297mm` or `na_letter_8.5x11in`. When omitted, the printer's own default is used. |
+| `sides` | str | `"one-sided"` | One of `"one-sided"`, `"two-sided-long-edge"`, or `"two-sided-short-edge"`. |
+| `color_mode` | str | `"monochrome"` | One of `"auto"`, `"color"`, or `"monochrome"`. |
+
+The same fields can go in the user config as `print_defaults`, and the paper
+config wins where both set a value.
+
+Printing only happens when you pass `--print`:
+
+```shell
+uv run goosepaper --print
+```
+
+Because papers are laid out for e-ink by default, set
+`"page_profile": "a4"` (or `"letter"`) in the `paper` section when the paper is
+destined for a physical printer.
+
+To print every morning, run Goosepaper on a schedule (cron on the host, or a
+scheduled container run in Portainer):
+
+```shell
+0 6 * * * docker run --rm -v /srv/goosepaper:/goosepaper/mount j6k4m8/goosepaper \
+    goosepaper -c mount/goosepaper.json -o mount/Goosepaper.pdf --print
+```
+
+The container needs network access to the printer, so run it on a network that
+can reach the printer's IP (Docker's default bridge network usually can, since
+it routes through the host).
+
 ## CLI Overrides
 
 These flags apply to a single run:
@@ -97,6 +155,17 @@ Available delivery flags:
 - `--replace-mode`
 - `--cleanup`
 - `--no-cleanup`
+
+Available printing flags:
+
+- `--print`
+- `--printer`
+- `--copies`
+- `--media`
+- `--sides`
+- `--color-mode`
+
+`--deliver` and `--print` are independent, so a single run can do both.
 
 Run-specific options like `--output` and `--nostory` are CLI-only and do not belong in config files.
 

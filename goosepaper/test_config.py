@@ -577,3 +577,128 @@ def test_load_paper_config_rejects_invalid_weather_clock_format():
             lambda: load_paper_config(config_path),
             'clock_format must be either "12h" or "24h"',
         )
+
+
+def test_resolve_runtime_config_merges_print_settings():
+    with _TempWorkspace() as tmp_path:
+        os.environ["XDG_CONFIG_HOME"] = str(tmp_path / "xdg")
+
+        _write_json(
+            tmp_path / "goosepaper.json",
+            {
+                "version": 2,
+                "paper": {"page_profile": "a4"},
+                "sources": [{"type": "text", "headline": "hello"}],
+                "printing": {"printer": "TS5350a.local", "copies": 2},
+            },
+        )
+        _write_json(
+            tmp_path / "xdg" / "goosepaper" / "config.json",
+            {
+                "version": 2,
+                "print_defaults": {
+                    "printer": "192.168.1.42",
+                    "media": "iso_a4_210x297mm",
+                    "color_mode": "color",
+                },
+            },
+        )
+
+        config = resolve_runtime_config(["--print", "--color-mode", "monochrome"])
+
+        assert config.print_paper is True
+        assert config.printing.printer == "TS5350a.local"
+        assert config.printing.copies == 2
+        assert config.printing.media == "iso_a4_210x297mm"
+        assert config.printing.sides == "one-sided"
+        assert config.printing.color_mode == "monochrome"
+
+
+def test_resolve_runtime_config_rejects_print_overrides_without_print_flag():
+    with _TempWorkspace() as tmp_path:
+        os.environ["XDG_CONFIG_HOME"] = str(tmp_path / "xdg")
+        _write_json(
+            tmp_path / "goosepaper.json",
+            {
+                "version": 2,
+                "paper": {},
+                "sources": [{"type": "text", "headline": "hello"}],
+            },
+        )
+
+        _assert_config_error(
+            lambda: resolve_runtime_config(["--printer", "printer.local"]),
+            "Printing override flags require '--print'",
+        )
+
+
+def test_resolve_runtime_config_requires_printer_when_printing():
+    with _TempWorkspace() as tmp_path:
+        os.environ["XDG_CONFIG_HOME"] = str(tmp_path / "xdg")
+        _write_json(
+            tmp_path / "goosepaper.json",
+            {
+                "version": 2,
+                "paper": {},
+                "sources": [{"type": "text", "headline": "hello"}],
+            },
+        )
+
+        _assert_config_error(
+            lambda: resolve_runtime_config(["--print"]),
+            "Printing requires a printer address",
+        )
+
+
+def test_resolve_runtime_config_allows_nostory_with_print():
+    with _TempWorkspace() as tmp_path:
+        os.environ["XDG_CONFIG_HOME"] = str(tmp_path / "xdg")
+
+        config = resolve_runtime_config(
+            [
+                "--print",
+                "--printer",
+                "192.168.1.42",
+                "--nostory",
+                "--output",
+                "existing.pdf",
+            ]
+        )
+
+        assert config.nostory is True
+        assert config.deliver is False
+        assert config.print_paper is True
+        assert config.printing.printer == "192.168.1.42"
+
+
+def test_load_paper_config_rejects_invalid_print_sides():
+    with _TempWorkspace() as tmp_path:
+        config_path = tmp_path / "paper.json"
+        _write_json(
+            config_path,
+            {
+                "version": 2,
+                "paper": {},
+                "sources": [],
+                "printing": {"printer": "printer.local", "sides": "sideways"},
+            },
+        )
+
+        _assert_config_error(
+            lambda: load_paper_config(config_path),
+            "sides must be one of",
+        )
+
+
+def test_load_user_config_rejects_invalid_print_copies():
+    with _TempWorkspace() as tmp_path:
+        os.environ["XDG_CONFIG_HOME"] = str(tmp_path)
+        _write_json(
+            tmp_path / "goosepaper" / "config.json",
+            {"version": 2, "print_defaults": {"copies": 0}},
+        )
+
+        _assert_config_error(
+            load_user_config,
+            "copies must be a positive integer",
+        )
