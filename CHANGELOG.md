@@ -1,5 +1,10 @@
 # CHANGELOG
 
+### Unreleased
+
+-   Improvements
+    -   Added IPP/AirPrint support so Goosepaper can send a rendered paper straight to a network printer with `--print`, a `printing` paper-config section, and `print_defaults` user-config defaults.
+
 ### **v0.8.1** (May 29, 2026)
 
 -   Fixes
