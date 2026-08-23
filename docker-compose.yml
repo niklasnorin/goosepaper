@@ -1,0 +1,20 @@
+# Portainer / Docker Compose stack for Goosepaper.
+#
+# Deploy this in Portainer with Stacks -> Add stack -> Repository (or paste the
+# contents into the web editor). Goosepaper is a one-shot job: the container
+# generates the paper and then exits, so the stack goes "inactive" once the run
+# finishes. Re-run it from Portainer whenever you want a fresh paper.
+services:
+  goosepaper:
+    image: ghcr.io/niklasnorin/goosepaper:latest
+    # Goosepaper reads its configuration from, and writes the PDF to, this
+    # volume. Point GOOSEPAPER_DATA at a host directory that holds your
+    # config file (see example-config.json in this repository).
+    volumes:
+      - ${GOOSEPAPER_DATA:-./data}:/data
+    command:
+      - --config
+      - /data/goosepaper.json
+      - --output
+      - /data/Goosepaper.pdf
+    restart: "no"
