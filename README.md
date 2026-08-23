@@ -42,7 +42,7 @@ Write a paper config file to tell Goosepaper what news you want to read. An exam
 From the directory that has the config file in it, run the following:
 
 ```shell
-docker run -it --rm -v $(pwd):/goosepaper/mount j6k4m8/goosepaper goosepaper -c mount/example-config.json -o mount/Goosepaper.pdf
+docker run -it --rm -v $(pwd):/data ghcr.io/niklasnorin/goosepaper -c /data/example-config.json -o /data/Goosepaper.pdf
 ```
 
 (where `example-config.json` is the name of the config file to use).
@@ -53,10 +53,10 @@ If you want to both generate the PDF and deliver it to your reMarkable tablet, p
 
 ```shell
 docker run -it --rm \
-    -v $(pwd):/goosepaper/mount \
+    -v $(pwd):/data \
     -v $HOME/.rmapi:/root/.rmapi \
-    j6k4m8/goosepaper \
-    goosepaper -c mount/example-config.json -o mount/Goosepaper.pdf --deliver
+    ghcr.io/niklasnorin/goosepaper \
+    -c /data/example-config.json -o /data/Goosepaper.pdf --deliver
 ```
 
 Otherwise, you can now email this PDF to your tablet, perhaps using [ReMailable](https://github.com/j6k4m8/remailable).
@@ -68,8 +68,8 @@ network printer that speaks IPP/AirPrint (most home printers do, including the
 Canon TS5350a). No print drivers or CUPS install required:
 
 ```shell
-docker run -it --rm -v $(pwd):/goosepaper/mount j6k4m8/goosepaper \
-    goosepaper -c mount/example-config.json -o mount/Goosepaper.pdf \
+docker run -it --rm -v $(pwd):/data ghcr.io/niklasnorin/goosepaper \
+    -c /data/example-config.json -o /data/Goosepaper.pdf \
     --print --printer 192.168.1.42
 ```
 
@@ -87,6 +87,46 @@ needs no extra flags:
 Set `"page_profile": "a4"` (or `"letter"`) in the `paper` section when the paper
 is headed for a printer instead of a tablet. More printing options are
 documented in [Customizing](docs/Customizing.md).
+
+## run it in portainer
+
+Every push to the default branch (and every `v*.*.*` tag) publishes a
+multi-architecture image — `linux/amd64` and `linux/arm64`, so Raspberry Pi
+hosts work too — to the GitHub Container Registry:
+
+```
+ghcr.io/niklasnorin/goosepaper:latest
+```
+
+Tags such as `ghcr.io/niklasnorin/goosepaper:1.2.3` and
+`ghcr.io/niklasnorin/goosepaper:sha-<commit>` are published as well if you'd
+rather pin to a specific build.
+
+### option A: pull the image
+
+In Portainer, go to **Images → Pull image** (or **Containers → Add container**)
+and enter `ghcr.io/niklasnorin/goosepaper:latest` as the image name. If the
+package is private, add a registry in **Registries → Add registry → Custom
+registry** pointing at `ghcr.io`, using your GitHub username and a personal
+access token with the `read:packages` scope.
+
+Then create a container with:
+
+- a bind mount / volume from the directory holding your config file to `/data`
+- the command `--config /data/goosepaper.json --output /data/Goosepaper.pdf`
+  (the image's entrypoint is `goosepaper` itself, so only pass flags)
+
+### option B: deploy the stack
+
+A ready-made [`docker-compose.yml`](docker-compose.yml) lives in this
+repository. In Portainer choose **Stacks → Add stack**, then either point it at
+this repository or paste the file into the web editor, and set the
+`GOOSEPAPER_DATA` environment variable to the host directory that contains your
+config file.
+
+Goosepaper is a one-shot job: the container writes the paper and then exits, so
+the container will show as stopped once it's done. Re-run it from Portainer (or
+from a scheduled job on the host) whenever you want a fresh paper.
 
 ## get started without docker: installation
 
