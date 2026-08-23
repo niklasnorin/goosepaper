@@ -4,6 +4,9 @@
 
 -   Improvements
     -   Added IPP/AirPrint support so Goosepaper can send a rendered paper straight to a network printer with `--print`, a `printing` paper-config section, and `print_defaults` user-config defaults.
+-   Fixes
+    -   Rasterize PDFs to Apple Raster (`image/urf`) before printing. Home AirPrint printers such as the Canon TS5300/TS5350a reject `application/pdf` with IPP status 0x040a.
+    -   Encode monochrome URF as 8-bit sGray (color space 0). Color space 4 is Device W / Gray32 and Canon rejects it with IPP status 0x0411.
 
 ### **v0.8.1** (May 29, 2026)
 

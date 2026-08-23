@@ -1,25 +1,27 @@
 """Send a rendered paper to a network printer with IPP (AirPrint).
 
 Most modern home printers — including the Canon TS5350a — speak IPP over the
-local network, so Goosepaper can hand the PDF straight to the printer without
-CUPS or any other print spooler being installed.
+local network. They typically accept Apple Raster (`image/urf`) or PWG Raster,
+not PDF, so Goosepaper rasterizes the rendered paper before sending it. No CUPS
+or other print spooler is required.
 """
 
 import struct
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
 from .config import PrintSettings
+from .raster import RasterError, URF_CONTENT_TYPE, rasterize_pdf
 
 DEFAULT_IPP_PORT = 631
 DEFAULT_IPP_PATH = "/ipp/print"
 IPP_CONTENT_TYPE = "application/ipp"
 IPP_VERSION = (1, 1)
 IPP_PRINT_JOB_OPERATION = 0x0002
-IPP_REQUEST_TIMEOUT_SECONDS = 60
+IPP_REQUEST_TIMEOUT_SECONDS = 180
 
 _OPERATION_ATTRIBUTES_TAG = 0x01
 _JOB_ATTRIBUTES_TAG = 0x02
@@ -34,9 +36,26 @@ _TAG_NATURAL_LANGUAGE = 0x48
 _TAG_MIME_MEDIA_TYPE = 0x49
 
 _DOCUMENT_FORMATS = {
-    ".pdf": "application/pdf",
+    ".pdf": URF_CONTENT_TYPE,
     ".ps": "application/postscript",
     ".txt": "text/plain",
+}
+
+_IPP_STATUS_NAMES = {
+    0x0000: "successful-ok",
+    0x0400: "client-error-bad-request",
+    0x0401: "client-error-forbidden",
+    0x0406: "client-error-not-found",
+    0x040A: "client-error-document-format-not-supported",
+    0x040B: "client-error-attributes-or-values-not-supported",
+    0x0410: "client-error-compression-error",
+    0x0411: "client-error-document-format-error",
+    0x0412: "client-error-document-access-error",
+    0x0500: "server-error-internal-error",
+    0x0501: "server-error-operation-not-supported",
+    0x0502: "server-error-service-unavailable",
+    0x0506: "server-error-not-accepting-jobs",
+    0x0507: "server-error-busy",
 }
 
 
@@ -92,6 +111,30 @@ def _document_format_for(suffix: str) -> str:
             f'Goosepaper can\'t print "{suffix}" files. '
             "Render a PDF (or another printer-friendly format) instead."
         ) from None
+
+
+def prepare_print_document(filepath, settings: PrintSettings) -> Tuple[bytes, str]:
+    """Return `(payload, document-format)` for an IPP Print-Job request.
+
+    PDFs are rasterized to Apple Raster because most AirPrint printers reject
+    `application/pdf` with IPP status 0x040a.
+    """
+    path = Path(filepath)
+    suffix = path.suffix.lower()
+    document_format = _document_format_for(suffix)
+    if suffix == ".pdf":
+        try:
+            return rasterize_pdf(path, settings), document_format
+        except RasterError as err:
+            raise PrintError(str(err)) from err
+    return path.read_bytes(), document_format
+
+
+def describe_ipp_status(status_code: int) -> str:
+    name = _IPP_STATUS_NAMES.get(status_code)
+    if name:
+        return f"0x{status_code:04x} {name}"
+    return f"0x{status_code:04x}"
 
 
 def _encode_attribute(tag: int, name: str, value: bytes) -> bytes:
@@ -181,14 +224,14 @@ def print_paper(
         raise PrintError(f"Error locating or opening {filepath} for printing.")
 
     printer_uri = normalize_printer_uri(print_settings.printer)
-    document_format = _document_format_for(resolved.suffix)
+    payload, document_format = prepare_print_document(resolved, print_settings)
 
     if showconfig:
         print(f"Printing to {printer_uri} as {document_format}.")
 
     request_body = build_print_job_request(
         printer_uri=printer_uri,
-        payload=resolved.read_bytes(),
+        payload=payload,
         job_name=filepath.stem,
         settings=print_settings,
         document_format=document_format,
@@ -213,7 +256,7 @@ def print_paper(
     status_code = parse_ipp_status_code(response.content)
     if status_code >= 0x0100:
         raise PrintError(
-            f"The printer rejected the job (IPP status 0x{status_code:04x})."
+            f"The printer rejected the job (IPP status {describe_ipp_status(status_code)})."
         )
 
     print("Honk! Sent to the printer!")

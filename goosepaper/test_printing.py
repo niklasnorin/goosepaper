@@ -8,6 +8,7 @@ from .config import PrintSettings
 from .printing import (
     PrintError,
     build_print_job_request,
+    describe_ipp_status,
     normalize_printer_uri,
     parse_ipp_status_code,
     print_paper,
@@ -40,6 +41,16 @@ def _write_pdf(directory: Path) -> Path:
     path = directory / "Goosepaper.pdf"
     path.write_bytes(b"%PDF-1.4 honk")
     return path
+
+
+def _write_text(directory: Path) -> Path:
+    path = directory / "Goosepaper.txt"
+    path.write_bytes(b"honk")
+    return path
+
+
+def _stub_rasterize_pdf(filepath, settings):
+    return b"UNIRAST\x00fake-urf"
 
 
 def test_normalize_printer_uri_expands_bare_hosts():
@@ -108,10 +119,17 @@ def test_parse_ipp_status_code():
         parse_ipp_status_code(b"\x02\x00")
 
 
+def test_describe_ipp_status():
+    assert describe_ipp_status(0x040A) == (
+        "0x040a client-error-document-format-not-supported"
+    )
+    assert describe_ipp_status(0x1234) == "0x1234"
+
+
 def test_print_paper_posts_ipp_request():
     session = _Session()
     with tempfile.TemporaryDirectory() as tmpdir:
-        path = _write_pdf(Path(tmpdir))
+        path = _write_text(Path(tmpdir))
         assert print_paper(
             path,
             PrintSettings(printer="192.168.1.42"),
@@ -122,12 +140,31 @@ def test_print_paper_posts_ipp_request():
     assert url == "http://192.168.1.42:631/ipp/print"
     assert headers["Content-Type"] == "application/ipp"
     assert timeout is not None
-    assert data.endswith(b"%PDF-1.4 honk")
+    assert data.endswith(b"honk")
+    assert b"text/plain" in data
+
+
+def test_print_paper_rasterizes_pdf_to_urf(monkeypatch):
+    monkeypatch.setattr(
+        "goosepaper.printing.rasterize_pdf", _stub_rasterize_pdf
+    )
+    session = _Session()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = _write_pdf(Path(tmpdir))
+        assert print_paper(
+            path,
+            PrintSettings(printer="192.168.1.42"),
+            session=session,
+        )
+
+    _url, data, _headers, _timeout = session.calls[0]
+    assert b"image/urf" in data
+    assert data.endswith(b"UNIRAST\x00fake-urf")
 
 
 def test_print_paper_requires_a_printer():
     with tempfile.TemporaryDirectory() as tmpdir:
-        path = _write_pdf(Path(tmpdir))
+        path = _write_text(Path(tmpdir))
         with pytest.raises(PrintError):
             print_paper(path, PrintSettings(), session=_Session())
 
@@ -154,7 +191,7 @@ def test_print_paper_rejects_unprintable_formats():
 def test_print_paper_raises_on_http_error():
     session = _Session(response=_Response(status_code=500))
     with tempfile.TemporaryDirectory() as tmpdir:
-        path = _write_pdf(Path(tmpdir))
+        path = _write_text(Path(tmpdir))
         with pytest.raises(PrintError):
             print_paper(
                 path, PrintSettings(printer="printer.local"), session=session
@@ -163,11 +200,11 @@ def test_print_paper_raises_on_http_error():
 
 def test_print_paper_raises_on_ipp_error_status():
     session = _Session(
-        response=_Response(content=_ipp_response_bytes(0x0400))
+        response=_Response(content=_ipp_response_bytes(0x040A))
     )
     with tempfile.TemporaryDirectory() as tmpdir:
-        path = _write_pdf(Path(tmpdir))
-        with pytest.raises(PrintError):
+        path = _write_text(Path(tmpdir))
+        with pytest.raises(PrintError, match="0x040a"):
             print_paper(
                 path, PrintSettings(printer="printer.local"), session=session
             )

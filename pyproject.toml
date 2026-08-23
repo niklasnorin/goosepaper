@@ -26,6 +26,7 @@ dependencies = [
   "beautifulsoup4",
   "lxml[html_clean]",
   "weasyprint",
+  "pypdfium2",
   "ebooklib",
   "readability-lxml",
   "remarkapy>=0.2.2,<0.3",

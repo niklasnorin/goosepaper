@@ -86,9 +86,10 @@ Delivery still happens only when you run Goosepaper with `--deliver`.
 
 Goosepaper can also send the finished paper straight to a network printer that
 speaks IPP (which is what AirPrint uses). Most home printers do, including the
-Canon TS5350a. No CUPS or printer driver is required: Goosepaper talks to the
-printer directly over the local network, which works well from a container on a
-home server as long as the container can reach the printer's IP.
+Canon TS5350a. No CUPS or printer driver is required: Goosepaper rasterizes the
+PDF to Apple Raster and talks to the printer directly over the local network,
+which works well from a container on a home server as long as the container can
+reach the printer's IP.
 
 Add a `printing` section to your paper config:
 

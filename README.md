@@ -65,7 +65,8 @@ Otherwise, you can now email this PDF to your tablet, perhaps using [ReMailable]
 
 If you'd rather read your paper on actual paper, Goosepaper can send it to a
 network printer that speaks IPP/AirPrint (most home printers do, including the
-Canon TS5350a). No print drivers or CUPS install required:
+Canon TS5350a). The PDF is rasterized to Apple Raster first — home printers
+almost never accept raw PDF over IPP. No print drivers or CUPS install required:
 
 ```shell
 docker run -it --rm -v $(pwd):/data ghcr.io/niklasnorin/goosepaper \
